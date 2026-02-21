@@ -150,48 +150,51 @@ async def start_otp_listener(bot, buyer_id: int, phone: str, session_string: str
             if not match:
                 return
             code = match.group(1)
-            try:
-                # Build one clean message with phone, OTP and password all copyable
-                msg = (
-                    f"<tg-emoji emoji-id=\"6106981506754814207\">✅</tg-emoji> <b>Login Details Ready!</b>\n\n"
-                    f"📱 <b>Phone Number:</b>\n<code>{phone}</code>\n\n"
-                    f"🔑 <b>OTP Code:</b>\n<code>{code}</code>\n\n"
-                )
-                if password_2fa:
-                    msg += f"<tg-emoji emoji-id=\"6106902616795519273\">🔒</tg-emoji> <b>2FA Password:</b>\n<code>{password_2fa}</code>\n\n"
-                msg += (
-                    f"<tg-emoji emoji-id=\"6107323579425104140\">🤖</tg-emoji> <i>Enter the phone number, then OTP, then 2FA password to complete login.</i>"
-                )
-                bot.send_message(buyer_id, msg, parse_mode="HTML")
+            loop = asyncio.get_event_loop()
 
-                # ✅ OTP delivered — NOW deduct payment and finalize
-                finalized = db.finalize_purchase(buyer_id)
-                if finalized:
-                    new_balance = db.get_balance(buyer_id)
-                    bot.send_message(
-                        buyer_id,
-                        f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Payment Deducted</b>\n\n"
-                        f"Remaining Balance: <b>{new_balance:.3f} TON</b>",
-                        parse_mode="HTML"
-                    )
-                otp_delivered.set()
-
-                # Ask buyer to leave a review after successful purchase
+            def send_all():
                 try:
+                    # Build one clean message with phone, OTP and password all copyable
+                    msg = (
+                        f"<tg-emoji emoji-id=\"6106981506754814207\">✅</tg-emoji> <b>Login Details Ready!</b>\n\n"
+                        f"📱 <b>Phone Number:</b>\n<code>{phone}</code>\n\n"
+                        f"🔑 <b>OTP Code:</b>\n<code>{code}</code>\n\n"
+                    )
+                    if password_2fa:
+                        msg += f"<tg-emoji emoji-id=\"6106902616795519273\">🔒</tg-emoji> <b>2FA Password:</b>\n<code>{password_2fa}</code>\n\n"
+                    msg += (
+                        f"<tg-emoji emoji-id=\"6107323579425104140\">🤖</tg-emoji> <i>Enter the phone, then OTP, then 2FA to complete login.</i>"
+                    )
+                    bot.send_message(buyer_id, msg, parse_mode="HTML")
+
+                    # Deduct payment and finalize
+                    finalized = db.finalize_purchase(buyer_id)
+                    if finalized:
+                        new_balance = db.get_balance(buyer_id)
+                        bot.send_message(
+                            buyer_id,
+                            f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Payment Deducted</b>\n\n"
+                            f"Remaining Balance: <b>{new_balance:.3f} TON</b>",
+                            parse_mode="HTML"
+                        )
+
+                    # Ask for review
                     bot.send_message(
                         buyer_id,
                         f"<tg-emoji emoji-id=\"6107325885822540958\">🎁</tg-emoji> <b>Leave a Review & Get Rewarded!</b>\n\n"
                         f"Enjoyed your purchase? Drop a quick review and receive\n"
                         f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>0.5 TON free balance</b> as a thank you!\n\n"
-                        f"<tg-emoji emoji-id=\"6107212468621154692\">🏪</tg-emoji> Simply tap a star rating below to get started.",
+                        f"<tg-emoji emoji-id=\"6107212468621154692\">🏪</tg-emoji> Tap a star rating below to get started.",
                         parse_mode="HTML",
                         reply_markup=_review_rating_kb()
                     )
-                except Exception as re:
-                    logger.warning(f"Could not send review prompt to {buyer_id}: {re}")
 
-            except Exception as e:
-                logger.warning(f"Could not deliver OTP to buyer {buyer_id}: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not deliver OTP to buyer {buyer_id}: {e}")
+
+            # Run all bot sends in a thread so they don't block the Telethon event loop
+            await loop.run_in_executor(None, send_all)
+            otp_delivered.set()
 
         # Wait for OTP, cancellation, or 5-minute timeout
         otp_task = asyncio.ensure_future(otp_delivered.wait())

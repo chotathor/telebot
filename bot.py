@@ -199,7 +199,7 @@ def manage_stock_kb(accounts: list, page: int = 0):
         added = acc.get("added_at", "—")
         m.add(types.InlineKeyboardButton(
             f"📱 {acc['phone']}  |  {added}",
-            callback_data=f"stock_view_{acc['id']}"
+            callback_data=f"stock_view_{acc['id']}_{page}"
         ))
 
     # Pagination row
