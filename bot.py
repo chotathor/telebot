@@ -35,6 +35,9 @@ EMOJI_IDS = {
     "🪙": "6106898347598027963",   # toncoin
     "💲": "6107061783988542265",   # dollar
     "📈": "6104943961384688402",   # graph
+    "🏠": "6008258140108231117",   # main menu
+    "⏱": "5900104897885376843",    # timer/clock
+    "☑️": "5951665890079544884",    # verified check
 }
 
 def build(text: str):
@@ -277,10 +280,10 @@ def cmd_start(message):
     price = db.get_price_ton()
     send(uid,
         f"[E:👋] **Welcome, {name}!**\n\n"
-        f"[E:🏪] **Fragment Account Shop**\n"
+        f"[E:🏠] **Fragment Account Shop**\n"
         f"[E:💎] Buy verified Telegram Fragment accounts instantly.\n\n"
         f"[E:🪙] Price: **{price} TON** per account\n"
-        f"[E:✅] Instant delivery after payment\n"
+        f"[E:☑️] Instant delivery after payment\n"
         f"[E:🔒] Safe & automated",
         reply_markup=main_menu(uid)
     )
@@ -288,38 +291,34 @@ def cmd_start(message):
 
 # ─────────────────────── ADD BALANCE ──────────────────
 
-def send_payment_details(chat_id: int, uid: int, amount_ton: float):
-    """Send full payment details — wallet, memo, Tonkeeper button."""
-    bot.send_message(
-        chat_id,
-        f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Add Balance — {amount_ton:.3f} TON</b>\n\n"
-        f"Choose your payment method:\n\n"
-        f"<tg-emoji emoji-id=\"6107289979895945232\">💎</tg-emoji> <b>Option 1 — Tonkeeper</b>\n"
-        f"Tap the button below. Amount & memo are pre-filled — just confirm in Tonkeeper.\n\n"
-        f"<tg-emoji emoji-id=\"6107289979895945232\">💎</tg-emoji> <b>Option 2 — Any Other Wallet</b>\n"
-        f"Send manually to:\n"
-        f"<code>{BOT_WALLET}</code>\n\n"
-        f"<tg-emoji emoji-id=\"6106902616795519273\">🔒</tg-emoji> <b>Memo (required):</b>\n"
-        f"<code>{uid}</code>\n\n"
-        f"<tg-emoji emoji-id=\"6106898459267177284\">⚠️</tg-emoji> Always include your ID as memo or balance won\'t be credited!\n\n"
-        f"⏱ Balance credited automatically within ~1 minute.",
-        parse_mode="HTML",
-        reply_markup=payment_method_kb(uid, amount_ton)
-    )
+def add_balance_choose_kb():
+    """Two buttons — manual or Tonkeeper."""
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton("💎 Pay with Tonkeeper", callback_data="topup_tonkeeper"))
+    m.add(types.InlineKeyboardButton("📋 Manual Payment",     callback_data="topup_manual"))
+    return m
+
+
+def tonkeeper_payment_kb(uid: int, amount_ton: float):
+    """Tonkeeper deep link button + back."""
+    nano    = int(amount_ton * 1_000_000_000)
+    tk_link = f"https://app.tonkeeper.com/transfer/{BOT_WALLET}?amount={nano}&text={uid}"
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton("💎 Open Tonkeeper & Pay", url=tk_link))
+    m.add(types.InlineKeyboardButton("🔙 Back",                 callback_data="topup_back"))
+    return m
 
 
 @bot.message_handler(func=lambda m: m.text and "Add Balance" in m.text)
 def add_balance(message):
     uid = message.from_user.id
     db.add_user(uid, message.from_user.username or "")
-    price = db.get_price_ton()
     bot.send_message(
         uid,
         f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Add Balance</b>\n\n"
-        f"How much TON do you want to add?\n"
-        f"Select a quick amount or enter custom:",
+        f"Choose your preferred payment method:",
         parse_mode="HTML",
-        reply_markup=add_balance_amount_kb(price)
+        reply_markup=add_balance_choose_kb()
     )
 
 
@@ -330,38 +329,68 @@ def topup_cb(call):
     uid = call.from_user.id
     val = call.data.split("_", 1)[1]
 
+    # ── Back to method selection ───────────────────────
     if val == "back":
-        price = db.get_price_ton()
         bot.edit_message_text(
             f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Add Balance</b>\n\n"
-            f"How much TON do you want to add?\n"
-            f"Select a quick amount or enter custom:",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=add_balance_amount_kb(price)
+            f"Choose your preferred payment method:",
+            call.message.chat.id, call.message.message_id,
+            parse_mode="HTML", reply_markup=add_balance_choose_kb()
         )
         bot.answer_callback_query(call.id)
         return
 
-    if val == "custom":
+    # ── Manual payment — show wallet + memo immediately ─
+    if val == "manual":
+        bot.edit_message_text(
+            f"<tg-emoji emoji-id=\"6107289979895945232\">💎</tg-emoji> <b>Manual Payment</b>\n\n"
+            f"Send any amount of TON to the address below.\n"
+            f"<b>You must include your ID as memo</b> or it won\'t be credited.\n\n"
+            f"<tg-emoji emoji-id=\"6107289979895945232\">💎</tg-emoji> <b>Wallet Address:</b>\n"
+            f"<code>{BOT_WALLET}</code>\n\n"
+            f"<tg-emoji emoji-id=\"6106902616795519273\">🔒</tg-emoji> <b>Memo / Comment:</b>\n"
+            f"<code>{uid}</code>\n\n"
+            f"<tg-emoji emoji-id=\"5900104897885376843\">⏱</tg-emoji> Credited automatically within ~1 minute.\n"
+            f"<tg-emoji emoji-id=\"6106898459267177284\">⚠️</tg-emoji> Do not forget the memo!",
+            call.message.chat.id, call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("🔙 Back", callback_data="topup_back")
+            )
+        )
+        bot.answer_callback_query(call.id)
+        return
+
+    # ── Tonkeeper — ask amount as text ─────────────────
+    if val == "tonkeeper":
         set_state(uid, "topup_custom")
         bot.edit_message_text(
-            f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Custom Amount</b>\n\n"
-            f"Send the amount in TON you want to deposit.\n"
-            f"Example: <code>2.5</code>\n\n"
-            f"Send /cancel to go back.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML"
+            f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Tonkeeper Payment</b>\n\n"
+            f"How much TON do you want to deposit?\n"
+            f"Type the amount and send it. Example: <code>1.5</code>",
+            call.message.chat.id, call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("🔙 Back", callback_data="topup_back")
+            )
         )
         bot.answer_callback_query(call.id)
         return
 
+    # ── Amount received — show Tonkeeper link ──────────
     try:
         amount = float(val)
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        send_payment_details(call.message.chat.id, uid, amount)
+        bot.edit_message_text(
+            f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Tonkeeper Payment — {amount:.3f} TON</b>\n\n"
+            f"Tap the button below. Your wallet address, amount and memo\n"
+            f"are all pre-filled — just open and confirm.\n\n"
+            f"<tg-emoji emoji-id=\"5951665890079544884\">☑️</tg-emoji> Amount: <b>{amount:.3f} TON</b>\n"
+            f"<tg-emoji emoji-id=\"6106902616795519273\">🔒</tg-emoji> Memo: <code>{uid}</code>\n\n"
+            f"<tg-emoji emoji-id=\"5900104897885376843\">⏱</tg-emoji> Credited automatically within ~1 minute.",
+            call.message.chat.id, call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=tonkeeper_payment_kb(uid, amount)
+        )
     except ValueError:
         bot.answer_callback_query(call.id, "Invalid amount", show_alert=True)
     bot.answer_callback_query(call.id)
@@ -774,14 +803,29 @@ def handle_text(message):
         except ValueError:
             send(message.chat.id, f"[E:⚠️] Invalid amount. Send a positive number like 1.5")
 
-    # ── Buyer: custom topup amount ────────────────────────
+    # ── Buyer: tonkeeper amount input ─────────────────────
     elif state == "topup_custom":
         try:
             amount = float(text)
             if amount <= 0:
                 raise ValueError
             clear_state(uid)
-            send_payment_details(uid, uid, amount)
+            nano    = int(amount * 1_000_000_000)
+            tk_link = f"https://app.tonkeeper.com/transfer/{BOT_WALLET}?amount={nano}&text={uid}"
+            tk_kb   = types.InlineKeyboardMarkup()
+            tk_kb.add(types.InlineKeyboardButton("💎 Open Tonkeeper & Pay", url=tk_link))
+            tk_kb.add(types.InlineKeyboardButton("🔙 Back", callback_data="topup_back"))
+            bot.send_message(
+                uid,
+                f"<tg-emoji emoji-id=\"6106898347598027963\">🪙</tg-emoji> <b>Tonkeeper Payment — {amount:.3f} TON</b>\n\n"
+                f"Tap the button below. Your wallet address, amount and memo\n"
+                f"are all pre-filled — just open and confirm.\n\n"
+                f"<tg-emoji emoji-id=\"5951665890079544884\">☑️</tg-emoji> Amount: <b>{amount:.3f} TON</b>\n"
+                f"<tg-emoji emoji-id=\"6106902616795519273\">🔒</tg-emoji> Memo: <code>{uid}</code>\n\n"
+                f"<tg-emoji emoji-id=\"5900104897885376843\">⏱</tg-emoji> Credited automatically within ~1 minute.",
+                parse_mode="HTML",
+                reply_markup=tk_kb
+            )
         except ValueError:
             bot.send_message(
                 uid,
