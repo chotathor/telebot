@@ -689,6 +689,105 @@ def cancel_cmd(message):
 
 # ─────────────── STATE MACHINE ────────────────────────
 
+
+# ─────────────────────── MANAGE STOCK (ADMIN) ─────────
+
+def stock_list_text(accounts):
+    return f"📦 <b>Manage Stock</b>\n\n<b>{len(accounts)}</b> account(s) in stock.\nTap an account to view details or delete it."
+
+
+@bot.message_handler(func=lambda m: m.text and "Manage Stock" in m.text)
+def manage_stock(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    accounts = db.get_available_accounts()
+    if not accounts:
+        bot.send_message(message.chat.id, "⚠️ No accounts in stock to manage.")
+        return
+    bot.send_message(
+        message.chat.id,
+        stock_list_text(accounts),
+        parse_mode="HTML",
+        reply_markup=manage_stock_kb(accounts, page=0)
+    )
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("stock_page_"))
+def stock_page_cb(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id)
+        return
+    page     = int(call.data.split("_")[2])
+    accounts = db.get_available_accounts()
+    if not accounts:
+        bot.edit_message_text("📦 No accounts in stock.", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+        return
+    bot.edit_message_text(
+        stock_list_text(accounts),
+        call.message.chat.id, call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=manage_stock_kb(accounts, page=page)
+    )
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("stock_view_"))
+def stock_view_cb(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id)
+        return
+    parts      = call.data.split("_")
+    account_id = int(parts[2])
+    page       = int(parts[3]) if len(parts) > 3 else 0
+    account    = db.get_account_by_phone_id(account_id)
+    if not account:
+        bot.answer_callback_query(call.id, "Account not found!", show_alert=True)
+        return
+    bot.edit_message_text(
+        f"📱 <b>Account Details</b>\n\n"
+        f"📞 Phone: <code>{account['phone']}</code>\n"
+        f"🔒 2FA: <code>{account['password_2fa'] or 'None'}</code>\n"
+        f"📅 Added: {account['added_at']}\n\n"
+        f"Tap delete to remove from stock:",
+        call.message.chat.id, call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=account_action_kb(account_id, page)
+    )
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("stock_delete_"))
+def stock_delete_cb(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id)
+        return
+    parts      = call.data.split("_")
+    account_id = int(parts[2])
+    page       = int(parts[3]) if len(parts) > 3 else 0
+    deleted    = db.delete_account(account_id)
+    bot.answer_callback_query(call.id, "✅ Deleted!" if deleted else "❌ Could not delete.", show_alert=not deleted)
+    accounts = db.get_available_accounts()
+    if not accounts:
+        bot.edit_message_text("📦 No more accounts in stock.", call.message.chat.id, call.message.message_id)
+        return
+    if page > 0 and page * 5 >= len(accounts):
+        page = max(0, page - 1)
+    bot.edit_message_text(
+        stock_list_text(accounts),
+        call.message.chat.id, call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=manage_stock_kb(accounts, page=page)
+    )
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "stock_close")
+def stock_close_cb(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
+
+
 @bot.message_handler(func=lambda m: True)
 def handle_text(message):
     uid   = message.from_user.id
@@ -880,116 +979,6 @@ def handle_text(message):
         except Exception:
             pass
 
-
-
-
-# ─────────────────────── MANAGE STOCK (ADMIN) ─────────
-
-@bot.message_handler(func=lambda m: m.text and "Manage Stock" in m.text)
-def manage_stock(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    accounts = db.get_available_accounts()
-    if not accounts:
-        send(message.chat.id, "[E:⚠️] No accounts in stock to manage.")
-        return
-    send(
-        message.chat.id,
-        f"[E:📈] **Manage Stock**\n\n**{len(accounts)}** account(s) available.\nTap an account to view or delete it.",
-        reply_markup=manage_stock_kb(accounts, page=0)
-    )
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("stock_page_"))
-def stock_page_cb(call):
-    if call.from_user.id != ADMIN_ID:
-        bot.answer_callback_query(call.id)
-        return
-    page     = int(call.data.split("_")[2])
-    accounts = db.get_available_accounts()
-    if not accounts:
-        bot.edit_message_text("📦 No accounts in stock.", call.message.chat.id, call.message.message_id)
-        bot.answer_callback_query(call.id)
-        return
-    plain, entities = build(
-        f"[E:📈] **Manage Stock**\n\n**{len(accounts)}** account(s) available.\nTap an account to view or delete it."
-    )
-    try:
-        bot.edit_message_text(
-            plain, call.message.chat.id, call.message.message_id,
-            entities=entities or None, reply_markup=manage_stock_kb(accounts, page=page)
-        )
-    except Exception:
-        bot.edit_message_text(
-            plain, call.message.chat.id, call.message.message_id,
-            reply_markup=manage_stock_kb(accounts, page=page)
-        )
-    bot.answer_callback_query(call.id)
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("stock_view_"))
-def stock_view_cb(call):
-    if call.from_user.id != ADMIN_ID:
-        bot.answer_callback_query(call.id)
-        return
-    parts      = call.data.split("_")
-    account_id = int(parts[2])
-    page       = int(parts[3]) if len(parts) > 3 else 0
-    account    = db.get_account_by_phone_id(account_id)
-    if not account:
-        bot.answer_callback_query(call.id, "Account not found!", show_alert=True)
-        return
-    bot.edit_message_text(
-        f"📱 <b>Account Details</b>\n\n"
-        f"📞 Phone: <code>{account['phone']}</code>\n"
-        f"🔒 2FA: <code>{account['password_2fa'] or 'None'}</code>\n"
-        f"📅 Added: {account['added_at']}\n\n"
-        f"What would you like to do?",
-        call.message.chat.id, call.message.message_id,
-        parse_mode="HTML", reply_markup=account_action_kb(account_id, page)
-    )
-    bot.answer_callback_query(call.id)
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("stock_delete_"))
-def stock_delete_cb(call):
-    if call.from_user.id != ADMIN_ID:
-        bot.answer_callback_query(call.id)
-        return
-    parts      = call.data.split("_")
-    account_id = int(parts[2])
-    page       = int(parts[3]) if len(parts) > 3 else 0
-    deleted    = db.delete_account(account_id)
-    if deleted:
-        bot.answer_callback_query(call.id, "✅ Account deleted!")
-    else:
-        bot.answer_callback_query(call.id, "❌ Could not delete — may already be sold/reserved.", show_alert=True)
-    accounts = db.get_available_accounts()
-    if not accounts:
-        bot.edit_message_text("📦 No more accounts in stock.", call.message.chat.id, call.message.message_id)
-        return
-    per_page = 5
-    if page > 0 and page * per_page >= len(accounts):
-        page = max(0, page - 1)
-    plain, entities = build(
-        f"[E:📈] **Manage Stock**\n\n**{len(accounts)}** account(s) remaining.\nTap an account to view or delete it."
-    )
-    try:
-        bot.edit_message_text(
-            plain, call.message.chat.id, call.message.message_id,
-            entities=entities or None, reply_markup=manage_stock_kb(accounts, page=page)
-        )
-    except Exception:
-        bot.edit_message_text(
-            plain, call.message.chat.id, call.message.message_id,
-            reply_markup=manage_stock_kb(accounts, page=page)
-        )
-
-
-@bot.callback_query_handler(func=lambda c: c.data == "stock_close")
-def stock_close_cb(call):
-    bot.delete_message(call.message.chat.id, call.message.message_id)
-    bot.answer_callback_query(call.id)
 
 
 
